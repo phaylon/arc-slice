@@ -5,12 +5,30 @@ use std::sync::Arc;
 use arrayvec::ArrayVec;
 
 
+pub trait ArcSliceSplit: Sized {
+    type Item;
+
+    fn arc_slice_split_first(&self) -> Option<(&Self::Item, Self)>;
+    fn arc_slice_split_last(&self) -> Option<(&Self::Item, Self)>;
+}
+
 pub struct ArcSlice<T> {
     inner: ArcSliceInner<T>,
 }
 
 impl<T> ArcSlice<T> {
-    pub fn arc_split_first(&self) -> Option<(&T, Self)> {
+    fn raw_inner_slice(&self) -> &[T] {
+        match &self.inner {
+            ArcSliceInner::Empty => &[],
+            ArcSliceInner::Shared(slice, range) => &slice[range.clone()],
+        }
+    }
+}
+
+impl<T> ArcSliceSplit for ArcSlice<T> {
+    type Item = T;
+
+    fn arc_slice_split_first(&self) -> Option<(&Self::Item, Self)> {
         let ArcSliceInner::Shared(slice, range) = &self.inner else {
             return None;
         };
@@ -23,7 +41,7 @@ impl<T> ArcSlice<T> {
         }
     }
 
-    pub fn arc_split_last(&self) -> Option<(&T, Self)> {
+    fn arc_slice_split_last(&self) -> Option<(&Self::Item, Self)> {
         let ArcSliceInner::Shared(slice, range) = &self.inner else {
             return None;
         };
@@ -33,13 +51,6 @@ impl<T> ArcSlice<T> {
             }))
         } else {
             None
-        }
-    }
-
-    fn raw_inner_slice(&self) -> &[T] {
-        match &self.inner {
-            ArcSliceInner::Empty => &[],
-            ArcSliceInner::Shared(slice, range) => &slice[range.clone()],
         }
     }
 }
@@ -125,6 +136,18 @@ impl<T: fmt::Debug> fmt::Debug for ArcSlice<T> {
     }
 }
 
+impl<T> IntoIterator for ArcSlice<T>
+where
+    T: Clone,
+{
+    type Item = T;
+    type IntoIter = ArcSliceIter<Self>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ArcSliceIter { slice: self }
+    }
+}
+
 enum ArcSliceInner<T> {
     Empty,
     Shared(Arc<[T]>, Range<usize>),
@@ -146,10 +169,21 @@ pub struct SmallArcSlice<T, const CAP: usize> {
 }
 
 impl<T, const CAP: usize> SmallArcSlice<T, CAP> {
-    pub fn arc_split_first(&self) -> Option<(&T, Self)>
-    where
-        T: Clone,
-    {
+    fn raw_inner_slice(&self) -> &[T] {
+        match &self.inner {
+            SmallArcSliceInner::Inline(slice) => &slice[self.range.clone()],
+            SmallArcSliceInner::Shared(slice) => &slice[self.range.clone()],
+        }
+    }
+}
+
+impl<T, const CAP: usize> ArcSliceSplit for SmallArcSlice<T, CAP>
+where
+    T: Clone,
+{
+    type Item = T;
+
+    fn arc_slice_split_first(&self) -> Option<(&Self::Item, Self)> {
         if self.range.start < self.range.end {
             Some((&self[0], Self {
                 inner: self.inner.clone(),
@@ -160,10 +194,7 @@ impl<T, const CAP: usize> SmallArcSlice<T, CAP> {
         }
     }
 
-    pub fn arc_split_last(&self) -> Option<(&T, Self)>
-    where
-        T: Clone,
-    {
+    fn arc_slice_split_last(&self) -> Option<(&Self::Item, Self)> {
         if self.range.start < self.range.end {
             Some((self.last().unwrap(), Self {
                 inner: self.inner.clone(),
@@ -171,13 +202,6 @@ impl<T, const CAP: usize> SmallArcSlice<T, CAP> {
             }))
         } else {
             None
-        }
-    }
-
-    fn raw_inner_slice(&self) -> &[T] {
-        match &self.inner {
-            SmallArcSliceInner::Inline(slice) => &slice[self.range.clone()],
-            SmallArcSliceInner::Shared(slice) => &slice[self.range.clone()],
         }
     }
 }
@@ -273,8 +297,43 @@ impl<T: fmt::Debug, const CAP: usize> fmt::Debug for SmallArcSlice<T, CAP> {
     }
 }
 
+impl<T, const CAP: usize> IntoIterator for SmallArcSlice<T, CAP>
+where
+    T: Clone,
+{
+    type Item = T;
+    type IntoIter = ArcSliceIter<Self>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ArcSliceIter { slice: self }
+    }
+}
+
 #[derive(Clone)]
 enum SmallArcSliceInner<T, const CAP: usize> {
     Inline(ArrayVec<T, CAP>),
     Shared(Arc<[T]>),
+}
+
+#[derive(Clone)]
+pub struct ArcSliceIter<T> {
+    slice: T,
+}
+
+impl<I> Iterator for ArcSliceIter<I>
+where
+    I: ArcSliceSplit,
+    I::Item: Clone,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some((next, rest)) = self.slice.arc_slice_split_first() {
+            let next = next.clone();
+            self.slice = rest;
+            Some(next)
+        } else {
+            None
+        }
+    }
 }
