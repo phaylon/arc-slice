@@ -33,7 +33,7 @@ impl<T> ArcSliceSplit for ArcSlice<T> {
             return None;
         };
         if range.start < range.end {
-            Some((&slice[0], Self {
+            Some((&slice[range.clone()][0], Self {
                 inner: ArcSliceInner::Shared(slice.clone(), (range.start + 1)..range.end),
             }))
         } else {
@@ -46,7 +46,7 @@ impl<T> ArcSliceSplit for ArcSlice<T> {
             return None;
         };
         if range.start < range.end {
-            Some((slice.last().unwrap(), Self {
+            Some((slice[range.clone()].last().unwrap(), Self {
                 inner: ArcSliceInner::Shared(slice.clone(), range.start..(range.end - 1)),
             }))
         } else {
@@ -185,7 +185,7 @@ where
 
     fn arc_slice_split_first(&self) -> Option<(&Self::Item, Self)> {
         if self.range.start < self.range.end {
-            Some((&self[0], Self {
+            Some((&self.raw_inner_slice()[0], Self {
                 inner: self.inner.clone(),
                 range: (self.range.start + 1)..self.range.end,
             }))
@@ -196,7 +196,7 @@ where
 
     fn arc_slice_split_last(&self) -> Option<(&Self::Item, Self)> {
         if self.range.start < self.range.end {
-            Some((self.last().unwrap(), Self {
+            Some((self.raw_inner_slice().last().unwrap(), Self {
                 inner: self.inner.clone(),
                 range: self.range.start..(self.range.end - 1),
             }))
